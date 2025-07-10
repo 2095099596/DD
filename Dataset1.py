@@ -21,50 +21,6 @@ import math
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader, SubsetRandomSampler
 
-mean_path = '/mnt/hdb/LXH/data/guiyihua/1/mean_tsl.nc'
-std_path = '/mnt/hdb/LXH/data/guiyihua/1/std_tsl.nc'
-
-skt_mean_path = '/mnt/hdb/LXH/data/guiyihua/1/mean_tas.nc'
-skt_std_path = '/mnt/hdb/LXH/data/guiyihua/1/std_tas.nc'
-
-lai_mean_path = '/mnt/hdb/LXH/data/guiyihua/1/mean_lai.nc'
-lai_std_path = '/mnt/hdb/LXH/data/guiyihua/1/std_lai.nc'
-
-mean = xr.open_dataset(mean_path)
-std_ = xr.open_dataset(std_path)
-
-skt_mean = xr.open_dataset(skt_mean_path)
-skt_std_ = xr.open_dataset(skt_std_path)
-
-lai_mean = xr.open_dataset(lai_mean_path)
-lai_std_ = xr.open_dataset(lai_std_path)
-# 选取经纬度范围
-def select_region(ds, lon_min=-20, lon_max=50, lat_min=-35, lat_max=17):
-    # 如果经度有负值，转换为0~360
-    if ds.lon.min() < 0:
-        ds = ds.assign_coords(lon=((ds.lon + 360) % 360))
-    # 将经度范围转换为0~360
-    lon_min_360 = (lon_min + 360) % 360
-    lon_max_360 = (lon_max + 360) % 360
-    # 处理跨越0度的情况
-    if lon_min_360 <= lon_max_360:
-        ds_sel = ds.sel(lon=slice(lon_min_360, lon_max_360), lat=slice(lat_min, lat_max))
-    else:
-        # 跨越0度，比如 lon_min=340, lon_max=50
-        ds_part1 = ds.sel(lon=slice(lon_min_360, 360))
-        ds_part2 = ds.sel(lon=slice(0, lon_max_360))
-        ds_sel = ds_part1.combine_first(ds_part2).sel(lat=slice(lat_min, lat_max))
-    return ds_sel
-
-Tsl_mean_sel = select_region(mean, 0, 359.9, -60, 75)
-Tsl_std_sel = select_region(std_, 0, 359.9, -60, 75)
-skt_mean_sel = select_region(skt_mean,0, 359.9, -60, 75)
-skt_std_sel = select_region(skt_std_, 0, 359.9, -60, 75)
-lai_mean_sel = select_region(lai_mean, 0, 359.9, -60, 75)
-lai_std_sel = select_region(lai_std_, 0, 359.9, -60, 75)
-print(skt_mean_sel)
-print(Tsl_mean_sel)
-
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -83,8 +39,6 @@ class MultiFileBatchDataset(Dataset):
         :param apply_mean: 是否对数据进行均值处理（默认是 False）
         :param mean_dims: 求均值的维度（默认是 (2, 3)，假设是 height 和 width 维度）
         """
-
-
         self.file_paths = file_paths
         self.variable_name = variable_name
         self.batch_size = batch_size
@@ -96,7 +50,6 @@ class MultiFileBatchDataset(Dataset):
         self.target_size = target_size  # 目标尺寸
         self.qie = qie
         self.resample_daily = resample_daily
-
         self.var_name = var_name
         self.window_size = window_size
         self.slt_std = slt_std
@@ -127,8 +80,6 @@ class MultiFileBatchDataset(Dataset):
             # 选择纬度范围-35~17
             ds = ds.sel(lat=slice(-60, 75))
             return ds
-
-
         def preprocessERA(ds):
             # 如果经度范围是-180~180，转换为0~360
             if ds.lon.min() < 0:
@@ -165,20 +116,6 @@ class MultiFileBatchDataset(Dataset):
                 self.datasets.append(ds)
 
 
-        # self.std_ = torch.tensor(std_['stl1'].data).to(self.device)
-        # self.skt_std_ = torch.tensor(skt_std_['skt'].data).to(self.device)
-        # self.lai_std_ = torch.tensor(lai_std_['__xarray_dataarray_variable__'].data).to(self.device)
-        # self.skt_std = torch.tensor(skt_std['skt'].data).to(self.device)
-
-        self.lai_mean_sel = torch.tensor(lai_mean_sel['__xarray_dataarray_variable__'].values).to(self.device)
-        self.skt_mean_sel = torch.tensor(skt_mean_sel['__xarray_dataarray_variable__'].values).to(self.device)
-        self.Tsl_mean_sel = torch.tensor(Tsl_mean_sel['__xarray_dataarray_variable__'].values).to(self.device)
-
-        self.lai_std_sel = torch.tensor(lai_std_sel['__xarray_dataarray_variable__'].values).to(self.device)
-        self.skt_std_sel = torch.tensor(skt_std_sel['__xarray_dataarray_variable__'].values).to(self.device)
-        self.Tsl_std_sel = torch.tensor(Tsl_std_sel['__xarray_dataarray_variable__'].values).to(self.device)
-
-
         self.time_cumsum = [0]  # 时间索引累积和
 
 
@@ -189,17 +126,6 @@ class MultiFileBatchDataset(Dataset):
         else:
             self.datasets_daily = None
              #self.total_length = sum(len(ds[self.variable_name].time) for ds in self.datasets)
-        # if self.del_run:
-        #     new_time_ds = []
-        #     for ds in self.datasets:
-        #         time_var = ds["time"]
-        #         total_time_points = len(time_var)
-        #         if total_time_points > 365:
-        #             ds = ds.isel({'time': slice(None, -1)})
-        #             new_time_ds.append(ds)
-        #         else:
-        #             new_time_ds.append(ds)
-        #         self.datasets = new_time_ds
 
         if self.del_run:
             new_time_ds = []
@@ -211,9 +137,6 @@ class MultiFileBatchDataset(Dataset):
                     ds = ds.sel(time=~((time_var.dt.month == 2) & (time_var.dt.day == 29)))
                 new_time_ds.append(ds)
             self.datasets = new_time_ds
-
-
-
 
         if self.replace_nan_with_zero:
             new_time_ds = []
@@ -229,7 +152,6 @@ class MultiFileBatchDataset(Dataset):
                 new_time_ds.append(ds)
             self.datasets = new_time_ds
 
-
         self.total_length = sum(len(ds[self.variable_name].time) for ds in self.datasets)
         self.total_chunks = self.total_length // self.window_size  # 总块数（忽略余数）
         self.file_lengths = len(self.datasets)
@@ -238,9 +160,6 @@ class MultiFileBatchDataset(Dataset):
         for ds in self.datasets:
             long = len(ds[self.variable_name].time)
             self.num.append(long)
-        # self.file_idx = 0
-        # self.max = 0
-
 
     def reset_indices(self):
         """重置 file_idx、max 和 num"""
@@ -254,216 +173,41 @@ class MultiFileBatchDataset(Dataset):
 
     def __getitem__(self,key):
 
-        # print(self.file_idx)
-        # print(self.max)
-        # print(self.num)
-
         if (key - (self.max//self.window_size)) // (self.num[self.file_idx]//self.window_size) >0:
-            # self.win = self.num[self.file_idx] // 365 + self.win  # 165
             self.max = self.max + self.num[self.file_idx] # 累加
             self.file_idx = self.file_idx + 1
 
         start_idx = key * self.window_size
         end_idx = (key + 1) * self.window_size
-        # file_idx = key//365
-        # print((self.total_length // self.total_chunks ) * file_idx)
-
         ds = self.datasets[self.file_idx]
-        # print(ds)
         start_in_file = start_idx - self.max
         end_in_file = end_idx - self.max
-        # print(start_in_file, end_in_file)
         data = ds[self.variable_name].isel(time=slice(start_in_file, end_in_file)).values
-        # print(data.shape)
-        # print(self.variable_name)
-        # print(f"正在读取文件: {self.file_paths[self.file_idx]}")
         data = torch.tensor(data).to(self.device)
-        # 如果需要，将 NaN 替换为 0
-
-        # 可选择性地进行插值处理
-        # print(self.lai_mean_sel.shape)
-
-
-        # print(self.skt_std_sel.shape)
-
-        if self.test:
-            mean_path = '/mnt/hdb/LXH/data/JRA55/mean_tsl.nc'
-            std_path = '/mnt/hdb/LXH/data/JRA55/std_tas.nc'
-
-            skt_mean_path = '/mnt/hdb/LXH/data/JRA55/mean_tas.nc'
-            skt_std_path = '/mnt/hdb/LXH/data/JRA55/std_tsl.nc'
-
-            mean = xr.open_dataset(mean_path)
-            std_ = xr.open_dataset(std_path)
-
-            skt_mean = xr.open_dataset(skt_mean_path)
-            skt_std_ = xr.open_dataset(skt_std_path)
-
-
-            lon_min, lon_max = 0, 360
-            lat_min, lat_max = -60, 75
-
-            Tsl_mean_sel = mean.sel(lon=slice(lon_min, lon_max), lat=slice(lat_min, lat_max))
-            Tsl_std_sel = std_.sel(lon=slice(lon_min, lon_max), lat=slice(lat_min, lat_max))
-            skt_mean_sel = skt_mean.sel(lon=slice(lon_min, lon_max), lat=slice(lat_min, lat_max))
-            skt_std_sel = skt_std_.sel(lon=slice(lon_min, lon_max), lat=slice(lat_min, lat_max))
-
-
-
-            self.skt_mean_sel = torch.tensor(skt_mean_sel['__xarray_dataarray_variable__'].values).to(self.device)
-            self.Tsl_mean_sel = torch.tensor(Tsl_mean_sel['__xarray_dataarray_variable__'].values).to(self.device)
-
-
-            self.skt_std_sel = torch.tensor(skt_std_sel['__xarray_dataarray_variable__'].values).to(self.device)
-            self.Tsl_std_sel = torch.tensor(Tsl_std_sel['__xarray_dataarray_variable__'].values).to(self.device)
-
-            self.skt_mean_sel = self.skt_mean_sel.unsqueeze(1)  # [365, 1, 147, 288]
-            self.skt_mean_sel = F.interpolate(self.skt_mean_sel, size=(72, 144), mode='bilinear', align_corners=False)
-            self.skt_std_sel = self.skt_std_sel.unsqueeze(0).unsqueeze(0)
-            self.skt_std_sel = F.interpolate(self.skt_std_sel, size=(72, 144), mode='bilinear', align_corners=False)
-            self.Tsl_mean_sel = self.Tsl_mean_sel.unsqueeze(1)
-            self.Tsl_std_sel = self.Tsl_std_sel.unsqueeze(0).unsqueeze(0)
-
-
-        if self.test_GLDAS20:
-
-            mean_path = '/mnt/hdb/LXH/data/GLDAS/2.0_mean_soiltmp.nc'
-            std_path = '/mnt/hdb/LXH/data/GLDAS/2.0_std_soiltmp.nc'
-
-            skt_mean_path = '/mnt/hdb/LXH/data/GLDAS/2.0_mean_tas.nc'
-            skt_std_path = '/mnt/hdb/LXH/data/GLDAS/2.0_std_tas.nc'
-
-            mean = xr.open_dataset(mean_path)
-            std_ = xr.open_dataset(std_path)
-
-            skt_mean = xr.open_dataset(skt_mean_path)
-            skt_std_ = xr.open_dataset(skt_std_path)
-
-
-            lon_min, lon_max = 0, 360
-            lat_min, lat_max = -60, 75
-
-            Tsl_mean_sel = mean.sel(lon=slice(lon_min, lon_max), lat=slice(lat_min, lat_max))
-            Tsl_std_sel = std_.sel(lon=slice(lon_min, lon_max), lat=slice(lat_min, lat_max))
-            skt_mean_sel = skt_mean.sel(lon=slice(lon_min, lon_max), lat=slice(lat_min, lat_max))
-            skt_std_sel = skt_std_.sel(lon=slice(lon_min, lon_max), lat=slice(lat_min, lat_max))
-
-
-
-            self.skt_mean_sel = torch.tensor(skt_mean_sel['__xarray_dataarray_variable__'].values).to(self.device)
-            self.Tsl_mean_sel = torch.tensor(Tsl_mean_sel['__xarray_dataarray_variable__'].values).to(self.device)
-
-
-            self.skt_std_sel = torch.tensor(skt_std_sel['__xarray_dataarray_variable__'].values).to(self.device)
-            self.Tsl_std_sel = torch.tensor(Tsl_std_sel['__xarray_dataarray_variable__'].values).to(self.device)
-
-            self.skt_mean_sel = self.skt_mean_sel.unsqueeze(1)  # [365, 1, 147, 288]
-            self.skt_mean_sel = F.interpolate(self.skt_mean_sel, size=(72, 144), mode='bilinear', align_corners=False)
-            self.skt_std_sel = self.skt_std_sel.unsqueeze(0).unsqueeze(0)
-            self.skt_std_sel = F.interpolate(self.skt_std_sel, size=(72, 144), mode='bilinear', align_corners=False)
-            self.Tsl_mean_sel = self.Tsl_mean_sel.unsqueeze(1)
-            self.Tsl_mean_sel = F.interpolate(self.Tsl_mean_sel, size=(72, 144), mode='bilinear', align_corners=False)
-            self.Tsl_std_sel = self.Tsl_std_sel.unsqueeze(0).unsqueeze(0)
-            self.Tsl_std_sel = F.interpolate(self.Tsl_std_sel, size=(72, 144), mode='bilinear', align_corners=False)
-
-
-        # if self.test_GLDAS20:
-              # 在第1维插入一个维度
-
-        # print(data.shape)
-        # print(self.skt_mean_sel.shape)
-        # print(self.skt_std_sel.shape)
-
-
-        # self.skt_mean_sel = self.skt_mean_sel.unsqueeze(1)  # [365, 1, 144, 288]
-        # # 使用双线性插值，缩小为(72, 144)
-        # self.skt_mean_sel = F.interpolate(self.skt_mean_sel, size=(72, 144), mode='bilinear', align_corners=False)
-        # # 去掉channel维度
-        # self.skt_mean_sel = self.skt_mean_sel.squeeze(1)  # [365, 72, 144]
-        #
-        # self.skt_std_sel = self.skt_std_sel.unsqueeze(0).unsqueeze(0)  # [1, 1, 144, 288]
-        # self.skt_std_sel = F.interpolate(self.skt_std_sel, size=(72, 144), mode='bilinear', align_corners=False)
-        # self.skt_std_sel = self.skt_std_sel.squeeze(0).squeeze(0)  # [72, 144]
-        # #
-        # #
-
-        # #
-        # # # print('-------------------------------------------------')
-        # print(data.shape)
-        # print(self.skt_mean_sel.shape)
-        # print(self.skt_std_sel.shape)
-
-
-
-        # data = data.unsqueeze(1)
-
-        # print(data.shape)
-        # print(self.skt_mean_sel.shape)
-        # print(self.skt_std_sel.shape)
 
         if self.normalize_slt:
-            # print('Normalizing SLT')
-
             data = data - 273.15
-            # data = data - self.Tsl_mean_sel
-            # data = data / self.Tsl_std_sel
-
 
         if self.normalize_lai:
-            # print(data[1, 35, :])
-            # count_zeros = (data == 0).sum().item()  # 统计等于0的元素个数
-            # print("数据中0的个数是:", count_zeros)
-            # print('Normalizing LAI')
             data = data*(10368/3202)
-            # data = data - self.lai_mean_sel
-            # data = data/self.lai_std_sel
-
 
         if self.normalize_skt:
             data = data - 273.15
-            # data = data - self.skt_mean_sel
-            # data = data / self.skt_std_sel
-
-        # data = data.squeeze(1)
 
         if self.apply_interpolation:
             data = self._apply_interpolation(data)
-
-
-        # # data = data.unsqueeze(1)
-        # print(data.shape)
-        # print(self.skt_mean_sel.shape)
-        # print(self.skt_std_sel.shape)
-
 
         if self.replace_nan_with_zero_0:
             data = self._replace_nan_with_zero(data)
 
 
-
-
-
-
-
-
-
-        # self.lai_std_sel = self._replace_nan_with_zero(self.lai_std_sel)
-        # # print(data.shape)
-        # # torch.set_printoptions(profile="full")
-        #  #print(data[10,:,:])
-        # print(torch.mean(self.lai_std_sel, dim=(0, 1)))
-        # print('--------------------------')
-
         # 是否求均值 目标值
         if self.apply_mean:
             data = torch.mean(data, dim=(1, 2))
 
-        # print('4')
-        # print(data.shape)
         if torch.isnan(data).any() or torch.isinf(data).any():
             print("Warning: targets contain NaN or Inf")
 
-        # print(data.shape)
 
         return data
 
@@ -471,44 +215,6 @@ class MultiFileBatchDataset(Dataset):
         std_safe = torch.where(std == 0, torch.ones_like(std), std)
         return data / std_safe
 
-
-
-    def _normalize(self, data):
-        """
-        改进版归一化函数，实现：
-        1. 计算时忽略0和NaN
-        2. 归一化后恢复原始零值位置
-        3. 提供阈值控制置零能力
-        """
-        # ==================== 前置处理 ====================
-        # 记录原始零值和NaN位置
-        zero_mask = (data == 0)
-        nan_mask = torch.isnan(data)
-
-        # ==================== 极值计算 ====================
-        # 计算有效值范围（忽略0和NaN）
-        temp = data.masked_fill(zero_mask | nan_mask, float('inf'))
-        matrix_min = temp.min(dim=1, keepdim=True)[0].min(dim=2, keepdim=True)[0]
-
-        temp = data.masked_fill(zero_mask | nan_mask, float('-inf'))
-        matrix_max = temp.max(dim=1, keepdim=True)[0].max(dim=2, keepdim=True)[0]
-        # ==================== 安全归一化 ====================
-        denominator = matrix_max - matrix_min
-        denominator = torch.where(denominator == 0, 1.0, denominator)  # 处理零分母
-        normalized = (data - matrix_min) / denominator
-        # ==================== 后处理置零 ====================
-        # 1. 恢复原始零值
-        normalized[zero_mask] = 0.0
-
-        # 2. 阈值置零（示例：将小于0.2的值置零）
-        # normalized[normalized < 0.2] = 0.0  # 可按需启用
-
-        # 3. 异常值处理（超出[0,1]范围的置零）
-        # normalized[(normalized < 0) | (normalized > 1)] = 0.0  # 按需启用
-        # ==================== 特殊值保留 ====================
-        normalized[nan_mask] = torch.nan  # 保持原始NaN
-
-        return normalized
 
     def _apply_mean(self, data):
         """
@@ -653,18 +359,6 @@ class MultiFileBatchDatasetBiao(Dataset):
                 self.datasets.append(ds)
 
 
-        # self.std_ = torch.tensor(std_['stl1'].data).to(self.device)
-        # self.skt_std_ = torch.tensor(skt_std_['skt'].data).to(self.device)
-        # self.lai_std_ = torch.tensor(lai_std_['__xarray_dataarray_variable__'].data).to(self.device)
-        # self.skt_std = torch.tensor(skt_std['skt'].data).to(self.device)
-
-        self.lai_mean_sel = torch.tensor(lai_mean_sel['__xarray_dataarray_variable__'].values).to(self.device)
-        self.skt_mean_sel = torch.tensor(skt_mean_sel['__xarray_dataarray_variable__'].values).to(self.device)
-        self.Tsl_mean_sel = torch.tensor(Tsl_mean_sel['__xarray_dataarray_variable__'].values).to(self.device)
-
-        self.lai_std_sel = torch.tensor(lai_std_sel['__xarray_dataarray_variable__'].values).to(self.device)
-        self.skt_std_sel = torch.tensor(skt_std_sel['__xarray_dataarray_variable__'].values).to(self.device)
-        self.Tsl_std_sel = torch.tensor(Tsl_std_sel['__xarray_dataarray_variable__'].values).to(self.device)
 
 
         self.time_cumsum = [0]  # 时间索引累积和
@@ -677,17 +371,6 @@ class MultiFileBatchDatasetBiao(Dataset):
         else:
             self.datasets_daily = None
              #self.total_length = sum(len(ds[self.variable_name].time) for ds in self.datasets)
-        # if self.del_run:
-        #     new_time_ds = []
-        #     for ds in self.datasets:
-        #         time_var = ds["time"]
-        #         total_time_points = len(time_var)
-        #         if total_time_points > 365:
-        #             ds = ds.isel({'time': slice(None, -1)})
-        #             new_time_ds.append(ds)
-        #         else:
-        #             new_time_ds.append(ds)
-        #         self.datasets = new_time_ds
 
         if self.del_run:
             new_time_ds = []
@@ -766,7 +449,6 @@ class MultiFileBatchDatasetBiao(Dataset):
         # print(self.variable_name)
         # print(f"正在读取文件: {self.file_paths[self.file_idx]}")
         data = torch.tensor(data).to(self.device)
-        # 如果需要，将 NaN 替换为 0
 
         # 可选择性地进行插值处理
         # print(self.lai_mean_sel.shape)
@@ -774,158 +456,7 @@ class MultiFileBatchDatasetBiao(Dataset):
 
         # print(self.skt_std_sel.shape)
 
-        if self.test:
-            mean_path = '/mnt/hdb/LXH/data/JRA55/mean_tsl.nc'
-            std_path = '/mnt/hdb/LXH/data/JRA55/std_tas.nc'
-
-            skt_mean_path = '/mnt/hdb/LXH/data/JRA55/mean_tas.nc'
-            skt_std_path = '/mnt/hdb/LXH/data/JRA55/std_tsl.nc'
-
-            mean = xr.open_dataset(mean_path)
-            std_ = xr.open_dataset(std_path)
-
-            skt_mean = xr.open_dataset(skt_mean_path)
-            skt_std_ = xr.open_dataset(skt_std_path)
-
-
-            lon_min, lon_max = 0, 360
-            lat_min, lat_max = -60, 75
-
-            Tsl_mean_sel = mean.sel(lon=slice(lon_min, lon_max), lat=slice(lat_min, lat_max))
-            Tsl_std_sel = std_.sel(lon=slice(lon_min, lon_max), lat=slice(lat_min, lat_max))
-            skt_mean_sel = skt_mean.sel(lon=slice(lon_min, lon_max), lat=slice(lat_min, lat_max))
-            skt_std_sel = skt_std_.sel(lon=slice(lon_min, lon_max), lat=slice(lat_min, lat_max))
-
-
-
-            self.skt_mean_sel = torch.tensor(skt_mean_sel['__xarray_dataarray_variable__'].values).to(self.device)
-            self.Tsl_mean_sel = torch.tensor(Tsl_mean_sel['__xarray_dataarray_variable__'].values).to(self.device)
-
-
-            self.skt_std_sel = torch.tensor(skt_std_sel['__xarray_dataarray_variable__'].values).to(self.device)
-            self.Tsl_std_sel = torch.tensor(Tsl_std_sel['__xarray_dataarray_variable__'].values).to(self.device)
-
-            self.skt_mean_sel = self.skt_mean_sel.unsqueeze(1)  # [365, 1, 147, 288]
-            self.skt_mean_sel = F.interpolate(self.skt_mean_sel, size=(72, 144), mode='bilinear', align_corners=False)
-            self.skt_std_sel = self.skt_std_sel.unsqueeze(0).unsqueeze(0)
-            self.skt_std_sel = F.interpolate(self.skt_std_sel, size=(72, 144), mode='bilinear', align_corners=False)
-            self.Tsl_mean_sel = self.Tsl_mean_sel.unsqueeze(1)
-            self.Tsl_std_sel = self.Tsl_std_sel.unsqueeze(0).unsqueeze(0)
-
-        def preprocessERA2(ds):
-            # 如果经度范围是-180~180，转换为0~360
-            if ds.lon.min() < 0:
-                ds = ds.assign_coords(lon=((ds.lon + 360) % 360))
-                ds = ds.sortby('lon')  # 关键：排序经度坐标，保证升序
-            # 选择经度范围-20~50对应的0~360范围，即340~50，跨越0度，需要分段选择
-            ds = ds.sel(lon=slice(0, 360))
-            # 选择纬度范围-35~17
-            ds = ds.sel(lat=slice(-60, 75))
-            return ds
-
-        if self.test_GLDAS20:
-
-            mean_path = '/mnt/hdb/LXH/data/MERRA/mean_tsl.nc'
-            std_path = '/mnt/hdb/LXH/data/MERRA/std_tsl.nc'
-
-            skt_mean_path = '/mnt/hdb/LXH/data/MERRA/mean_tas.nc'
-            skt_std_path = '/mnt/hdb/LXH/data/MERRA/std_tas.nc'
-
-            mean = xr.open_dataset(mean_path)
-            std_ = xr.open_dataset(std_path)
-
-            skt_mean = xr.open_dataset(skt_mean_path)
-            skt_std_ = xr.open_dataset(skt_std_path)
-
-            # print(skt_std_)
-
-
-            # lon_min, lon_max = 0, 360
-            # lat_min, lat_max = -60, 75
-            #
-            # Tsl_mean_sel = mean.sel(lon=slice(lon_min, lon_max), lat=slice(lat_min, lat_max))
-            # Tsl_std_sel = std_.sel(lon=slice(lon_min, lon_max), lat=slice(lat_min, lat_max))
-            # skt_mean_sel = skt_mean.sel(lon=slice(lon_min, lon_max), lat=slice(lat_min, lat_max))
-            # skt_std_sel = skt_std_.sel(lon=slice(lon_min, lon_max), lat=slice(lat_min, lat_max))
-
-            skt_std_sel = preprocessERA2(skt_std_)
-            skt_mean_sel = preprocessERA2(skt_mean)
-            Tsl_mean_sel = preprocessERA2(mean)
-            Tsl_std_sel = preprocessERA2(std_)
-            # print(skt_std_sel)
-
-
-
-            self.skt_mean_sel = torch.tensor(skt_mean_sel['__xarray_dataarray_variable__'].values).to(self.device)
-            self.Tsl_mean_sel = torch.tensor(Tsl_mean_sel['__xarray_dataarray_variable__'].values).to(self.device)
-
-
-            self.skt_std_sel = torch.tensor(skt_std_sel['__xarray_dataarray_variable__'].values).to(self.device)
-            self.Tsl_std_sel = torch.tensor(Tsl_std_sel['__xarray_dataarray_variable__'].values).to(self.device)
-
-            self.skt_mean_sel = self.skt_mean_sel.unsqueeze(1)  # [365, 1, 147, 288]
-            self.skt_mean_sel = F.interpolate(self.skt_mean_sel, size=(72, 144), mode='bilinear', align_corners=False)
-            self.skt_std_sel = self.skt_std_sel.unsqueeze(0).unsqueeze(0)
-            self.skt_std_sel = F.interpolate(self.skt_std_sel, size=(72, 144), mode='bilinear', align_corners=False)
-            self.Tsl_mean_sel = self.Tsl_mean_sel.unsqueeze(1)
-            self.Tsl_mean_sel = F.interpolate(self.Tsl_mean_sel, size=(72, 144), mode='bilinear', align_corners=False)
-            self.Tsl_std_sel = self.Tsl_std_sel.unsqueeze(0).unsqueeze(0)
-            self.Tsl_std_sel = F.interpolate(self.Tsl_std_sel, size=(72, 144), mode='bilinear', align_corners=False)
-
-
-
-
-        # if self.test_GLDAS20:
-        #
-        #     mean_path = '/mnt/hdb/LXH/data/Era5/mean_tsl.nc'
-        #     std_path = '/mnt/hdb/LXH/data/Era5/std_tsl.nc'
-        #
-        #     skt_mean_path = '/mnt/hdb/LXH/data/Era5/mean_tas.nc'
-        #     skt_std_path = '/mnt/hdb/LXH/data/Era5/std_tas.nc'
-        #
-        #     mean = xr.open_dataset(mean_path)
-        #     std_ = xr.open_dataset(std_path)
-        #
-        #     skt_mean = xr.open_dataset(skt_mean_path)
-        #     skt_std_ = xr.open_dataset(skt_std_path)
-        #
-        #     # print(skt_mean)
-        #
-        #     skt_std_sel = preprocessERA2(skt_std_)
-        #     skt_mean_sel = preprocessERA2(skt_mean)
-        #     Tsl_mean_sel = preprocessERA2(mean)
-        #     Tsl_std_sel = preprocessERA2(std_)
-        #
-        #     skt_std_sel = skt_std_sel.sortby('lat', ascending=True)
-        #     skt_mean_sel = skt_mean_sel.sortby('lat', ascending=True)
-        #     Tsl_mean_sel = Tsl_mean_sel.sortby('lat', ascending=True)
-        #     Tsl_std_sel = Tsl_std_sel.sortby('lat', ascending=True)
-        # if self.test_GLDAS20:
-              # 在第1维插入一个维度
-
-        # print(data.shape)
-        # print(self.skt_mean_sel.shape)
-        # print(self.skt_std_sel.shape)
-
-
-        # self.skt_mean_sel = self.skt_mean_sel.unsqueeze(1)  # [365, 1, 144, 288]
-        # # 使用双线性插值，缩小为(72, 144)
-        # self.skt_mean_sel = F.interpolate(self.skt_mean_sel, size=(72, 144), mode='bilinear', align_corners=False)
-        # # 去掉channel维度
-        # self.skt_mean_sel = self.skt_mean_sel.squeeze(1)  # [365, 72, 144]
-        #
-        # self.skt_std_sel = self.skt_std_sel.unsqueeze(0).unsqueeze(0)  # [1, 1, 144, 288]
-        # self.skt_std_sel = F.interpolate(self.skt_std_sel, size=(72, 144), mode='bilinear', align_corners=False)
-        # self.skt_std_sel = self.skt_std_sel.squeeze(0).squeeze(0)  # [72, 144]
-        # #
-        # #
-
-        # #
-        # # # print('-------------------------------------------------')
-        # print(data.shape)
-        # print(self.skt_mean_sel.shape)
-        # print(self.skt_std_sel.shape)
-
+       
         if self.apply_interpolation:
             data = self._apply_interpolation(data)
 
@@ -935,59 +466,23 @@ class MultiFileBatchDatasetBiao(Dataset):
         print(self.skt_mean_sel.shape)
         print(self.skt_std_sel.shape)
 
-        # slice_0 = self.skt_mean_sel[0,0,:, :].cpu().numpy()  # 转成numpy数组方便matplotlib使用
-        # # 可视化
-        # plt.imshow(slice_0, cmap='viridis')  # 你可以换成 'gray' 或其他colormap
-        # plt.colorbar()
-        # plt.title('Slice 0 visualization')
-        # plt.show()
-        # #
-        # slice_2 = data[0,0 ,:, :].cpu().numpy()  # 转成numpy数组方便matplotlib使用
-        # # 可视化
-        # plt.imshow(slice_2, cmap='viridis')  # 你可以换成 'gray' 或其他colormap
-        # plt.colorbar()
-        # plt.title('slice_2 visualization')
-        # plt.show()
-        #
-        # slice_3 = self.Tsl_std_sel[0, 0, :, :].cpu().numpy()  # 转成numpy数组方便matplotlib使用
-        # # 可视化
-        # plt.imshow(slice_3, cmap='viridis')  # 你可以换成 'gray' 或其他colormap
-        # plt.colorbar()
-        # plt.title('slice_2 visualization')
-        # plt.show()
 
         if self.normalize_slt:
-            # print('Normalizing SLT')
-
             data = data - 273.15
-            # data = data - self.Tsl_mean_sel
-            # data = data / self.Tsl_std_sel
-
 
         if self.normalize_lai:
-            # print(data[1, 35, :])
-            # count_zeros = (data == 0).sum().item()  # 统计等于0的元素个数
-            # print("数据中0的个数是:", count_zeros)
-            # print('Normalizing LAI')
             data = data*(10368/3202)
-            # data = data - self.lai_mean_sel
-            # data = data/self.lai_std_sel
+
 
 
         if self.normalize_skt:
             data = data - 273.15
-            # data = data - self.skt_mean_sel
-            # data = data / self.skt_std_sel
+
 
         # data = data.squeeze(1)
 
 
 
-
-        # # data = data.unsqueeze(1)
-        # print(data.shape)
-        # print(self.skt_mean_sel.shape)
-        # print(self.skt_std_sel.shape)
 
 
         if self.replace_nan_with_zero_0:
@@ -996,17 +491,6 @@ class MultiFileBatchDatasetBiao(Dataset):
 
 
 
-
-
-
-
-
-        # self.lai_std_sel = self._replace_nan_with_zero(self.lai_std_sel)
-        # # print(data.shape)
-        # # torch.set_printoptions(profile="full")
-        #  #print(data[10,:,:])
-        # print(torch.mean(self.lai_std_sel, dim=(0, 1)))
-        # print('--------------------------')
 
         # 是否求均值 目标值
         if self.apply_mean:
@@ -1026,43 +510,6 @@ class MultiFileBatchDatasetBiao(Dataset):
         return data / std_safe
 
 
-
-    def _normalize(self, data):
-        """
-        改进版归一化函数，实现：
-        1. 计算时忽略0和NaN
-        2. 归一化后恢复原始零值位置
-        3. 提供阈值控制置零能力
-        """
-        # ==================== 前置处理 ====================
-        # 记录原始零值和NaN位置
-        zero_mask = (data == 0)
-        nan_mask = torch.isnan(data)
-
-        # ==================== 极值计算 ====================
-        # 计算有效值范围（忽略0和NaN）
-        temp = data.masked_fill(zero_mask | nan_mask, float('inf'))
-        matrix_min = temp.min(dim=1, keepdim=True)[0].min(dim=2, keepdim=True)[0]
-
-        temp = data.masked_fill(zero_mask | nan_mask, float('-inf'))
-        matrix_max = temp.max(dim=1, keepdim=True)[0].max(dim=2, keepdim=True)[0]
-        # ==================== 安全归一化 ====================
-        denominator = matrix_max - matrix_min
-        denominator = torch.where(denominator == 0, 1.0, denominator)  # 处理零分母
-        normalized = (data - matrix_min) / denominator
-        # ==================== 后处理置零 ====================
-        # 1. 恢复原始零值
-        normalized[zero_mask] = 0.0
-
-        # 2. 阈值置零（示例：将小于0.2的值置零）
-        # normalized[normalized < 0.2] = 0.0  # 可按需启用
-
-        # 3. 异常值处理（超出[0,1]范围的置零）
-        # normalized[(normalized < 0) | (normalized > 1)] = 0.0  # 按需启用
-        # ==================== 特殊值保留 ====================
-        normalized[nan_mask] = torch.nan  # 保持原始NaN
-
-        return normalized
 
     def _apply_mean(self, data):
         """
